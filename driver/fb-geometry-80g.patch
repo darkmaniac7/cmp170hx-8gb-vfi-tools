@@ -1,0 +1,297 @@
+# fb-geometry-80g.patch (2026-11-19)
+# Per-card FB geometry for the 8 GB CMP 170HX (10de:20c2): a card whose own floorsweep leaves 10 of
+# its 12 FB partitions active gets LMR 0x28B and 80 GiB; every other card keeps the values the
+# unlocker writes today (64 GiB). Kill switch: NVreg_RegistryDwords CmpFbGeometry=0. Log only:
+# CmpFbGeometry=2.
+# Applies with patch -p1 to NVIDIA open-gpu-kernel-modules 615.71.09 after the cmpunlocker patch set
+# (github.com/amoghmunikote/cmpunlocker at 2c7e2ec, after ecc-reporting.patch). It also applies after
+# p2p-unlock.patch on the Morrowmake fork's p2p-ecc branch (87cb5fd). See driver/README.md.
+# License: GPL v2, like the cmpunlocker patches it builds on (driver/LICENSE). The modified files
+# keep their original NVIDIA license notices.
+--- a/src/nvidia/generated/g_kernel_gsp_nvoc.h
++++ b/src/nvidia/generated/g_kernel_gsp_nvoc.h
+@@ -637,6 +637,8 @@
+     NvBool bBootGspRmWithBoostClocks;
+     NvU8 ememPort;
+     GspNocatData nocatData;
++    NvU64 cmpFbGeometryBytes;
++    NvBool bCmpFbGeometryBootFailed;
+ };
+ 
+ 
+--- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
++++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+@@ -138,6 +138,167 @@
+             devId == SEC2_POSTBL_TIMING_CMP_170HX_10GB_PCI_DEVICE_ID);
+ }
+ 
++//
++// Per-card FB geometry for the 8 GB CMP 170HX (0x20C2).
++//
++// The unlock programs every 8 GB card for 8 active FB partitions (FBP) at
++// 8 GiB each: FBPA_CFG1 0x02779000 and LMR 0x20B = 64 GiB. A card whose
++// floorsweep leaves 10 of the 12 FBPs active has 80 GiB behind the same
++// per-partition config and needs LMR 0x28B instead.
++//
++// The choice comes from what the card itself reports, never from a slot, bus
++// or index, and it does not depend on which two FBPs are off:
++//   - devinit sized the card for exactly 10 partitions (FB size 10 GiB, LMR
++//     0x288 with the stock CFG1 0x02449000), or the 80 GiB values of an
++//     earlier init are still in place (FB size 80 GiB, LMR 0x28B, CFG1
++//     0x02779000);
++//   - OPT_FBP_DISABLE has exactly 2 of its 12 bits set, STATUS_FBP agrees and
++//     no FBP marked in OPT_FBP_DEFECTIVE is left active;
++//   - OPT_FBPA_DISABLE, OPT_FBIO_DISABLE and OPT_ROP_L2_DISABLE all equal the
++//     pair expansion of that FBP mask (FBP n owns bits 2n and 2n+1);
++//   - FBPA_NUM_ACTIVE equals the active FBP count.
++// Every other layout keeps the legacy 64 GiB values.
++//
++// Registry key CmpFbGeometry (NVreg_RegistryDwords): 0 = legacy values on
++// every card (kill switch), 1 or absent = automatic, 2 = evaluate and log
++// only. Any other value is treated as 0.
++//
++// Returns the FB size in bytes and sets *pLmrValue when the 10-partition
++// geometry applies; returns 0 and leaves *pLmrValue alone otherwise. This
++// function only reads registers, and it reads none at all on a card whose
++// pre-unlock FB size is not a 10-partition size. The choice is logged for
++// every card together with its PCI address.
++//
++#define CMP_FBGEOM_REGKEY               "CmpFbGeometry"
++#define CMP_FBGEOM_MODE_AUTO            1U
++#define CMP_FBGEOM_MODE_DRYRUN          2U
++#define CMP_FBGEOM_NUM_FBP              12U
++#define CMP_FBGEOM_ACTIVE_FBP_80G       10U
++#define CMP_FBGEOM_STOCK_FBP_BYTES      0x0000000040000000ULL
++#define CMP_FBGEOM_UNLOCK_FBP_BYTES     0x0000000200000000ULL
++#define CMP_FBGEOM_MMU_LMR              0x00100ce0U
++#define CMP_FBGEOM_OPT_ROP_L2_DISABLE   0x008202c4U
++#define CMP_FBGEOM_OPT_FBP_DISABLE      0x00820364U
++#define CMP_FBGEOM_OPT_FBPA_DISABLE     0x00820368U
++#define CMP_FBGEOM_OPT_FBIO_DISABLE     0x0082036cU
++#define CMP_FBGEOM_OPT_FBP_DEFECTIVE    0x008205ccU
++#define CMP_FBGEOM_STATUS_FBP           0x00820d38U
++#define CMP_FBGEOM_FBPA_NUM_ACTIVE      0x009a0164U
++#define CMP_FBGEOM_FBPA_CFG1            0x009a0204U
++#define CMP_FBGEOM_CFG1_STOCK           0x02449000U
++#define CMP_FBGEOM_CFG1_UNLOCK          0x02779000U
++#define CMP_FBGEOM_LMR_LEGACY           0x0000020BU
++
++static NvU64
++_kgspCmpFbGeometrySelect(OBJGPU *pGpu, NvU64 preFbSize, NvU32 *pLmrValue)
++{
++    const NvU64 stockBytes  = CMP_FBGEOM_ACTIVE_FBP_80G * CMP_FBGEOM_STOCK_FBP_BYTES;
++    const NvU64 unlockBytes = CMP_FBGEOM_ACTIVE_FBP_80G * CMP_FBGEOM_UNLOCK_FBP_BYTES;
++    const NvU32 pciDomain = gpuGetDomain(pGpu);
++    const NvU32 pciBus    = gpuGetBus(pGpu);
++    const NvU32 pciDevice = gpuGetDevice(pGpu);
++    const char *pReason = NULL;
++    NvU32 mode = CMP_FBGEOM_MODE_AUTO;
++    NvU32 lmrPre, cfg1Pre, fbp, fbpStatus, fbpDefective, fbpa, fbio, ropL2, numActive;
++    NvU32 lmrStock, lmrUnlock;
++    NvU32 pairMask = 0;
++    NvU32 active = 0;
++    NvU32 i;
++
++    if (osReadRegistryDword(pGpu, CMP_FBGEOM_REGKEY, &mode) != NV_OK)
++        mode = CMP_FBGEOM_MODE_AUTO;
++
++    if ((mode != CMP_FBGEOM_MODE_AUTO) && (mode != CMP_FBGEOM_MODE_DRYRUN))
++    {
++        NV_PRINTF(LEVEL_ERROR,
++                  "SEC2_DEBUG: FB geometry %04x:%02x:%02x: legacy 64 GiB, %s=%u\n",
++                  pciDomain, pciBus, pciDevice, CMP_FBGEOM_REGKEY, mode);
++        return 0;
++    }
++
++    if ((preFbSize != stockBytes) && (preFbSize != unlockBytes))
++    {
++        NV_PRINTF(LEVEL_ERROR,
++                  "SEC2_DEBUG: FB geometry %04x:%02x:%02x: legacy 64 GiB, pre-unlock "
++                  "FB 0x%llx is not a 10-partition size\n",
++                  pciDomain, pciBus, pciDevice, preFbSize);
++        return 0;
++    }
++
++    lmrPre       = GPU_REG_RD32(pGpu, CMP_FBGEOM_MMU_LMR);
++    cfg1Pre      = GPU_REG_RD32(pGpu, CMP_FBGEOM_FBPA_CFG1);
++    fbp          = GPU_REG_RD32(pGpu, CMP_FBGEOM_OPT_FBP_DISABLE);
++    fbpStatus    = GPU_REG_RD32(pGpu, CMP_FBGEOM_STATUS_FBP);
++    fbpDefective = GPU_REG_RD32(pGpu, CMP_FBGEOM_OPT_FBP_DEFECTIVE);
++    fbpa         = GPU_REG_RD32(pGpu, CMP_FBGEOM_OPT_FBPA_DISABLE);
++    fbio         = GPU_REG_RD32(pGpu, CMP_FBGEOM_OPT_FBIO_DISABLE);
++    ropL2        = GPU_REG_RD32(pGpu, CMP_FBGEOM_OPT_ROP_L2_DISABLE);
++    numActive    = GPU_REG_RD32(pGpu, CMP_FBGEOM_FBPA_NUM_ACTIVE);
++
++    NV_PRINTF(LEVEL_ERROR,
++              "SEC2_DEBUG: FB geometry %04x:%02x:%02x: probe preFb=0x%llx LMR=0x%08x "
++              "CFG1=0x%08x FBP=0x%08x FBP_STATUS=0x%08x FBP_DEFECTIVE=0x%08x "
++              "FBPA=0x%08x FBIO=0x%08x ROP_L2=0x%08x NUM_ACTIVE=0x%08x mode=%u\n",
++              pciDomain, pciBus, pciDevice, preFbSize, lmrPre, cfg1Pre, fbp,
++              fbpStatus, fbpDefective, fbpa, fbio, ropL2, numActive, mode);
++
++    for (i = 0; i < CMP_FBGEOM_NUM_FBP; i++)
++    {
++        if ((fbp & NVBIT32(i)) != 0U)
++            pairMask |= (0x3U << (2U * i));
++        else
++            active++;
++    }
++
++    // LMR: MAG [9:4] = 4 per active FBP, SCALE [3:0] = 8 (stock) or 11 (unlock).
++    lmrStock  = ((active * 4U) << 4) | 0x8U;
++    lmrUnlock = ((active * 4U) << 4) | 0xBU;
++
++    if ((fbp & ~(NVBIT32(CMP_FBGEOM_NUM_FBP) - 1U)) != 0U)
++        pReason = "FBP mask has bits outside the 12 partitions";
++    else if (active != CMP_FBGEOM_ACTIVE_FBP_80G)
++        pReason = "active FBP count is not 10";
++    else if (fbpStatus != fbp)
++        pReason = "STATUS_FBP differs from OPT_FBP_DISABLE";
++    else if ((fbpDefective & ~fbp) != 0U)
++        pReason = "an FBP marked defective is active";
++    else if ((fbpa != pairMask) || (fbio != pairMask) || (ropL2 != pairMask))
++        pReason = "FBPA/FBIO/ROP_L2 masks do not match the FBP mask";
++    else if (numActive != active)
++        pReason = "FBPA_NUM_ACTIVE differs from the active FBP count";
++    else if (!(((preFbSize == stockBytes) && (lmrPre == lmrStock) &&
++                (cfg1Pre == CMP_FBGEOM_CFG1_STOCK)) ||
++               ((preFbSize == unlockBytes) && (lmrPre == lmrUnlock) &&
++                (cfg1Pre == CMP_FBGEOM_CFG1_UNLOCK))))
++        pReason = "FB size, LMR and CFG1 are neither the devinit nor the 80 GiB state";
++
++    if (pReason != NULL)
++    {
++        NV_PRINTF(LEVEL_ERROR,
++                  "SEC2_DEBUG: FB geometry %04x:%02x:%02x: legacy 64 GiB, %s "
++                  "(active FBP %u)\n",
++                  pciDomain, pciBus, pciDevice, pReason, active);
++        return 0;
++    }
++
++    if (mode == CMP_FBGEOM_MODE_DRYRUN)
++    {
++        NV_PRINTF(LEVEL_ERROR,
++                  "SEC2_DEBUG: FB geometry %04x:%02x:%02x: legacy 64 GiB, dry run; "
++                  "this card qualifies for 80 GiB (LMR 0x%08x)\n",
++                  pciDomain, pciBus, pciDevice, lmrUnlock);
++        return 0;
++    }
++
++    NV_PRINTF(LEVEL_ERROR,
++              "SEC2_DEBUG: FB geometry %04x:%02x:%02x: 10 of 12 FBP active "
++              "(off mask 0x%03x) -> 80 GiB, LMR 0x%08x\n",
++              pciDomain, pciBus, pciDevice, fbp, lmrUnlock);
++
++    *pLmrValue = lmrUnlock;
++    return unlockBytes;
++}
++
+ #include "crashcat/crashcat_report.h"
+ 
+ #include "kernel/gpu/oob/kernel_oob.h"
+@@ -5457,6 +5618,7 @@
+     KernelBif *pKernelBif = GPU_GET_KERNEL_BIF(pGpu);
+     NV_STATUS status;
+     NvBool bEccDisabled = !kmemsysCheckReadoutEccEnablement(pGpu, GPU_GET_KERNEL_MEMORY_SYSTEM(pGpu));
++    NvU64 cmpPreUnlockFbSize = 0;
+ 
+     NV_ASSERT_OR_RETURN(pbRetry != NULL, NV_ERR_INVALID_ARGUMENT);
+     *pbRetry = NV_FALSE;
+@@ -5487,6 +5649,7 @@
+                   SEC2_POSTBL_TIMING_WPR_META(pKernelGsp)->fbSize,
+                   SEC2_POSTBL_TIMING_WPR_META(pKernelGsp)->gspFwWprEnd,
+                   SEC2_POSTBL_TIMING_WPR_META(pKernelGsp)->gspFwHeapSize);
++        cmpPreUnlockFbSize = SEC2_POSTBL_TIMING_WPR_META(pKernelGsp)->fbSize;
+     }
+ 
+     {
+@@ -5586,10 +5749,24 @@
+             NvU32 cfg1Value;
+             NvU32 lmrValue;
+ 
++            pKernelGsp->cmpFbGeometryBytes = 0;
++
+             if (devId == SEC2_POSTBL_TIMING_CMP_170HX_8GB_PCI_DEVICE_ID)
+             {
+                 cfg1Value = 0x02779000U;
+                 lmrValue  = 0x0000020BU;
++                if (pKernelGsp->bCmpFbGeometryBootFailed)
++                {
++                    NV_PRINTF(LEVEL_ERROR,
++                              "SEC2_DEBUG: FB geometry %04x:%02x:%02x: legacy 64 GiB, "
++                              "the 80 GiB boot attempt failed\n",
++                              gpuGetDomain(pGpu), gpuGetBus(pGpu), gpuGetDevice(pGpu));
++                }
++                else
++                {
++                    pKernelGsp->cmpFbGeometryBytes =
++                        _kgspCmpFbGeometrySelect(pGpu, cmpPreUnlockFbSize, &lmrValue);
++                }
+             }
+             else
+             {
+@@ -5602,6 +5779,25 @@
+             GPU_REG_WR32(pGpu, 0x009a0204U, cfg1Value);
+             GPU_REG_WR32(pGpu, 0x00100ce0U, lmrValue);
+ 
++            if (pKernelGsp->cmpFbGeometryBytes != 0)
++            {
++                NvU32 cfg1Back = GPU_REG_RD32(pGpu, CMP_FBGEOM_FBPA_CFG1);
++                NvU32 lmrBack  = GPU_REG_RD32(pGpu, CMP_FBGEOM_MMU_LMR);
++
++                if ((cfg1Back != cfg1Value) || (lmrBack != lmrValue))
++                {
++                    NV_PRINTF(LEVEL_ERROR,
++                              "SEC2_DEBUG: FB geometry %04x:%02x:%02x: 80 GiB values did "
++                              "not read back (CFG1=0x%08x LMR=0x%08x), back to the legacy "
++                              "64 GiB values\n",
++                              gpuGetDomain(pGpu), gpuGetBus(pGpu), gpuGetDevice(pGpu),
++                              cfg1Back, lmrBack);
++                    pKernelGsp->cmpFbGeometryBytes = 0;
++                    lmrValue = CMP_FBGEOM_LMR_LEGACY;
++                    GPU_REG_WR32(pGpu, CMP_FBGEOM_MMU_LMR, lmrValue);
++                }
++            }
++
+             NV_PRINTF(LEVEL_ERROR,
+                       "SEC2_DEBUG: POST-WRITE SS0=0x%08x SS1=0x%08x "
+                       "CFG1=0x%08x LMR=0x%08x (devId=0x%x)\n",
+@@ -5971,6 +6167,16 @@
+         }
+     }
+ 
++    if ((status != NV_OK) && (pKernelGsp->cmpFbGeometryBytes != 0))
++    {
++        NV_PRINTF(LEVEL_ERROR,
++                  "SEC2_DEBUG: FB geometry %04x:%02x:%02x: GSP boot failed at 80 GiB "
++                  "(0x%x), a retry uses the legacy 64 GiB values\n",
++                  gpuGetDomain(pGpu), gpuGetBus(pGpu), gpuGetDevice(pGpu), status);
++        pKernelGsp->bCmpFbGeometryBootFailed = NV_TRUE;
++        pKernelGsp->cmpFbGeometryBytes = 0;
++    }
++
+     //
+     // The caller will check that both the API lock and the GPU lock will be held upon return from
+     // this function, regardless of whether GSP bootstrap succeeded.
+@@ -8101,6 +8307,21 @@
+                                     ? 0x0000001000000000ULL
+                                     : 0x0000000A00000000ULL;
+             NvU32 numRegions = pFbRegionInfoParams->numFBRegions;
++            KernelGsp *pKernelGspGeom = GPU_GET_KERNEL_GSP(pGpu);
++
++            if ((pKernelGspGeom != NULL) && (pKernelGspGeom->cmpFbGeometryBytes != 0))
++            {
++                targetFbBytes = pKernelGspGeom->cmpFbGeometryBytes;
++                if (pGSCI->fb_length != targetFbBytes)
++                {
++                    NV_PRINTF(LEVEL_ERROR,
++                              "SEC2_DEBUG: FB geometry %04x:%02x:%02x: firmware reports "
++                              "FB 0x%llx, not 0x%llx; keeping the firmware's figure\n",
++                              gpuGetDomain(pGpu), gpuGetBus(pGpu), gpuGetDevice(pGpu),
++                              pGSCI->fb_length, targetFbBytes);
++                    targetFbBytes = pGSCI->fb_length;
++                }
++            }
+ 
+             NV_PRINTF(LEVEL_ERROR,
+                       "SEC2_DEBUG: static-info BEFORE: fb_length=0x%llx numRegions=%u\n",
