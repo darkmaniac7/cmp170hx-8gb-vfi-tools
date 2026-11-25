@@ -607,9 +607,8 @@ step after it. [`tools/pcie/`](../tools/pcie/README.md) is the kit the lab's EPY
   (LnkCtl2 bit 5) on the card and the root port before write 7, then keeps a 3 s quiet window with no BAR0 access and
   checks the root port first. With v3: 12 of 12 clean E1 runs on that server, and no halt at any boot of the service
   since. Patch `0012` makes the same fix in the
-  glitch tools' `Bar0.wr32`. This supersedes the wiki's
-  [PCIe Gen4 on a burned 8 GB card](https://cmp.wiki/wiki/PCIe_Gen4_on_a_burned_8_GB_card) page, which still calls
-  the halts open.
+  glitch tools' `Bar0.wr32`. The wiki has the same account:
+  [PCIe Gen4 on a burned 8 GB card](https://cmp.wiki/wiki/PCIe_Gen4_on_a_burned_8_GB_card#The_host_halts:_found_and_fixed).
 - **At every boot:** stage 1 walks each `0x20C2` card to Gen3 through the driver; stage 2, on the cards whose GEN23
   reads 0, does the seven E1 writes and one retrain to Gen4. A marker file per card is written before each step and
   removed after it; a marker left over at boot means the host went down during that card's step, and that card is
@@ -746,8 +745,8 @@ On cmp.wiki:
 - [Gen2 link retrain](https://cmp.wiki/wiki/Gen2_link_retrain): how cmpunlocker reaches Gen2.
 - [PCIe Gen3 on the 10 GB card](https://cmp.wiki/wiki/PCIe_Gen3_on_the_10_GB_card): the RM speed walk.
 - [PCIe Gen4 on the 10 GB card](https://cmp.wiki/wiki/PCIe_Gen4_on_the_10_GB_card): the E1 table and the pass gates.
-- [PCIe Gen4 on a burned 8 GB card](https://cmp.wiki/wiki/PCIe_Gen4_on_a_burned_8_GB_card): cards B and H at Gen4
-  (its host-halt section predates the v3 writer; see section 4.4).
+- [PCIe Gen4 on a burned 8 GB card](https://cmp.wiki/wiki/PCIe_Gen4_on_a_burned_8_GB_card): cards B and H at Gen4,
+  the boot service at every boot, and the host halts, found and fixed.
 - [Memory errors and ECC](https://cmp.wiki/wiki/Memory_errors_and_ECC): memory tests, the late-PMA fix, ECC.
 - [Testing and burn-in](https://cmp.wiki/wiki/Testing_and_burn-in): the test sequence and stop rules.
 - [Driver and unlock failures](https://cmp.wiki/wiki/Driver_and_unlock_failures): when the driver or unlock fails.
