@@ -18,6 +18,8 @@
 # CMP_SYSFS (default /sys) is only for tests.
 import mmap, os, pathlib, subprocess, sys, time
 
+if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
+    print("usage: cmp-e1steps <0000:bb:00.0>", file=sys.stderr); sys.exit(1)
 SYSFS = os.environ.get("CMP_SYSFS", "/sys")
 G = sys.argv[1].lower()
 P = pathlib.Path(SYSFS) / "bus/pci/devices" / G

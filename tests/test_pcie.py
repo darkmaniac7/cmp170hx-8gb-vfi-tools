@@ -240,6 +240,10 @@ class Gen23Read(unittest.TestCase):
                 env.poke({GEN23: val})
                 r = env.run([sys.executable, "-I", os.path.join(PCIE, "cmp-gen23read"), CARD])
                 self.assertEqual((r.returncode, r.stdout.strip()), (0, str(val)))
+            r_help = env.run([sys.executable, "-I", os.path.join(PCIE, "cmp-gen23read")])
+            self.assertEqual(r_help.returncode, 1)
+            r_e1_help = env.run([sys.executable, "-I", os.path.join(PCIE, "cmp-e1steps"), "--help"])
+            self.assertEqual(r_e1_help.returncode, 1)
         finally:
             env.close()
 
@@ -321,6 +325,13 @@ class Boot(unittest.TestCase):
         self.assertEqual(calls, ["rmwalk 05 settle=30", "rmwalk 06 settle=30"])
         self.assertIn("card 06 LOST during the walk (rc 2): disabled, stopping", out)
         self.assertEqual(self.flags(), ["disabled-06"])
+
+    def test_a_card_lost_in_gen4_disables_gen4_and_stops(self):
+        out, calls = self.boot(FAKE_G4_RC_05="2")
+        self.assertEqual(calls, ["rmwalk 05 settle=30", "rmwalk 06 settle=30", "rmwalk 07 settle=30",
+                                 "e1 05", "g4 05"])
+        self.assertIn("card 05 LOST during the Gen4 step (e1 rc 0, retrain rc 2): Gen4 disabled, stopping", out)
+        self.assertEqual(self.flags(), ["disabled-g4-05"])
 
     def test_off_flags(self):
         os.makedirs(self.state)

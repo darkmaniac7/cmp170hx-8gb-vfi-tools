@@ -4,6 +4,8 @@
 # CMP_SYSFS (default /sys) is only for tests.
 import mmap, os, sys
 
+if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
+    print("usage: cmp-gen23read <0000:bb:00.0>", file=sys.stderr); sys.exit(1)
 path = os.path.join(os.environ.get("CMP_SYSFS", "/sys"), "bus/pci/devices", sys.argv[1].lower(), "resource0")
 fd = os.open(path, os.O_RDONLY | os.O_SYNC)
 try:

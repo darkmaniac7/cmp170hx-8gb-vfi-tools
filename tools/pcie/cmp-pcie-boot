@@ -10,8 +10,9 @@
 #
 # Crash-loop guard: before a card's step a marker inflight-<bus> (stage 1) or inflight-g4-<bus> (stage 2) is written and
 # synced, and removed when the step returns. A marker left over at start means the host went down during that step last
-# boot: the card gets disabled-<bus> or disabled-g4-<bus> and is skipped from then on. A card lost during the walk (rc 2) is
-# disabled and the service stops there. Other failures are logged only (the card stays at Gen2 or Gen3).
+# boot: the card gets disabled-<bus> or disabled-g4-<bus> and is skipped from then on. A card lost off the bus during the
+# Gen3 walk or the Gen4 step (rc 2, or an unreadable LnkSta) gets disabled-<bus> or disabled-g4-<bus> and the service stops
+# there. Other failures are logged only (the card stays at Gen2 or Gen3).
 #   Retry a disabled card:   rm $STATE/disabled-<bus>   or   rm $STATE/disabled-g4-<bus>
 #   Skip everything:         touch $STATE/off            Skip stage 2 only:  touch $STATE/off-g4
 #
@@ -49,6 +50,12 @@ for b in $(cards); do
   python3 -I -u "$BIN/cmp-e1steps" 0000:$b:00.0 > "$L/boot-e1-$b.log" 2>&1; r1=$?
   if [ $r1 = 0 ]; then bash "$BIN/cmp-gen4retrain" 0000:$b:00.0 > "$L/boot-g4-$b.log" 2>&1; r2=$?; else r2=-; fi
   rm -f "$D/inflight-g4-$b"; sync
-  say "card $b Gen4: e1 rc $r1, retrain rc $r2, link $(setpci -s $b:00.0 CAP_EXP+12.w)"
+  ls=$(setpci -s $b:00.0 CAP_EXP+12.w 2>/dev/null)
+  if [ "$r2" = 2 ] || ! [[ $ls =~ ^[[:xdigit:]]{4}$ ]] || [ "${ls,,}" = ffff ]; then
+    : > "$D/disabled-g4-$b"; sync
+    say "card $b LOST during the Gen4 step (e1 rc $r1, retrain rc $r2): Gen4 disabled, stopping"
+    exit 0
+  fi
+  say "card $b Gen4: e1 rc $r1, retrain rc $r2, link $ls"
 done
 exit 0
