@@ -1,0 +1,15 @@
+#!/bin/bash
+# cmp-linkmon: read only. Every 60 s, LnkSta and AER UESta/CESta of every 10de:20c2 card and its upstream port, one line per
+# minute to linkmon-<boot id>.log, and a line to linkmon-events.log whenever any CE or UE status bit is set (the bits are
+# sticky until cleared, so a slot that keeps logging errors shows up once per minute). Log dir: $CMP_PCIE_LOG
+# (default /var/log/cmp-pcie). Run it in the background, for example: systemd-run --unit cmp-linkmon /usr/local/sbin/cmp-linkmon
+L=${CMP_PCIE_LOG:-/var/log/cmp-pcie}; mkdir -p "$L"; B=$(cut -c1-8 /proc/sys/kernel/random/boot_id)
+while true; do
+  line="$(date +%T) up $(cut -d. -f1 /proc/uptime)s"
+  for d in $(ls /sys/bus/pci/devices | grep -E ":00\.0$"); do [ "$(cat /sys/bus/pci/devices/$d/device 2>/dev/null)" = 0x20c2 ] || continue
+    p=$(basename "$(dirname "$(readlink -f /sys/bus/pci/devices/$d)")"); b=${d:5:2}
+    s="$b $(setpci -s $d CAP_EXP+12.w) ce $(setpci -s $d ECAP_AER+10.l) ue $(setpci -s $d ECAP_AER+04.l) / port ce $(setpci -s $p ECAP_AER+10.l) ue $(setpci -s $p ECAP_AER+04.l)"
+    line="$line | $s"; case "$s" in *"ce 00000000 ue 00000000 / port ce 00000000 ue 00000000") ;; *) echo "$(date +%FT%T) $s" >> "$L/linkmon-events.log";; esac
+  done
+  echo "$line" >> "$L/linkmon-$B.log"; sleep 60
+done

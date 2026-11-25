@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+# cmp-gen23read <card bdf>: prints PCIE_BOOT_GEN23_DISABLE (BAR0 0x82057c) as a decimal number. Read only.
+# 0 = the fuse is cleared (the card can take the Gen4 steps); 1 = still fused (never run cmp-e1steps on it).
+# CMP_SYSFS (default /sys) is only for tests.
+import mmap, os, sys
+
+path = os.path.join(os.environ.get("CMP_SYSFS", "/sys"), "bus/pci/devices", sys.argv[1].lower(), "resource0")
+fd = os.open(path, os.O_RDONLY | os.O_SYNC)
+try:
+    with mmap.mmap(fd, 0x824000, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ) as m:
+        mv = memoryview(m).cast("I")
+        print(mv[0x82057c >> 2])
+        mv.release()
+finally:
+    os.close(fd)

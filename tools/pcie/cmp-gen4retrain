@@ -1,0 +1,36 @@
+#!/bin/bash
+# cmp-gen4retrain <card bdf>: one config-space retrain from Gen3 to Gen4 after cmp-e1steps. Target link speed 4 on root port
+# and card, then Retrain Link on the root port, then a 60 s settle sampled every 5 s.
+# Refuses unless the card's config LnkCap max speed is 4, both LnkCap2 list 16 GT/s and the link is Gen3 at both ends.
+# If Gen4 does not come up it parks the targets at 3 at both ends and does not retrain again.
+# Exit: 0 Gen4 held 60 s; 1 refused; 2 link lost (cold power cycle); 5 Gen4 not established; 6 fell back in the settle.
+# Optional: CMP_PCIE_BW=<command> runs a bandwidth check after a pass (CUDA_VISIBLE_DEVICES is set to the card).
+set -u
+G=${1:?bdf}; RP=$(basename "$(dirname "$(readlink -f /sys/bus/pci/devices/$G)")")
+say() { echo "$(date +%T) $*"; }
+st() { local s; s=$(setpci -s "$1" CAP_EXP+12.w 2>/dev/null); [[ $s =~ ^[[:xdigit:]]{4}$ && ${s,,} != ffff ]] && echo "$s" || echo LOST; }
+xid() { journalctl -k -b --no-pager | grep -c "NVRM: Xid"; }
+info() { echo "card $(st $G) ue $(setpci -s $G ECAP_AER+04.l) ce $(setpci -s $G ECAP_AER+10.l) | port $(st $RP) ue $(setpci -s $RP ECAP_AER+04.l) ce $(setpci -s $RP ECAP_AER+10.l) | xid $(xid)"; }
+cap=$(setpci -s $G CAP_EXP+0c.l); c2=$(setpci -s $G CAP_EXP+2c.l); p2=$(setpci -s $RP CAP_EXP+2c.l); s0=$(st $G); p0=$(st $RP)
+say "pre: card LnkCap $cap LnkCap2 $c2 | port LnkCap2 $p2 | $(info)"
+[ $((16#$cap & 15)) = 4 ] && [ $(( (16#$c2 >> 4) & 1 )) = 1 ] && [ $(( (16#$p2 >> 4) & 1 )) = 1 ] || { say "NO-GO: 16 GT/s not advertised at both ends"; exit 1; }
+[ "$s0" != LOST ] && [ "$p0" != LOST ] && [ $((16#$s0 & 15)) = 3 ] && [ $((16#$p0 & 15)) = 3 ] || { say "NO-GO: link not Gen3"; exit 1; }
+W0=$(( (16#$s0 >> 4) & 63 ))
+say "TLS 4 on $RP and $G, Retrain Link on $RP"
+setpci -s $RP CAP_EXP+30.w=0004:000f; setpci -s $G CAP_EXP+30.w=0004:000f; setpci -s $RP CAP_EXP+10.w=0020:0020
+for i in $(seq 1 30); do sleep 0.1; s=$(st $RP); [ "$s" = LOST ] && break; (( (16#$s >> 11) & 1 )) || break; done
+sleep 0.5; s=$(st $G); p=$(st $RP); say "after retrain: $(info)"
+lspci -s $G -vv 2>/dev/null | grep -E "LnkSta:|LnkSta2:|LnkCtl2:" | sed 's/^\s*/   card /'
+lspci -s $RP -vv 2>/dev/null | grep -E "LnkSta:|LnkSta2:" | sed 's/^\s*/   port /'
+if [ "$s" = LOST ] || [ "$p" = LOST ]; then say "LINK LOST. Writing nothing more."; exit 2; fi
+if [ $((16#$s & 15)) != 4 ] || [ $((16#$p & 15)) != 4 ] || [ $(( (16#$s >> 4) & 63 )) -lt $W0 ]; then
+  say "Gen4 not established: card Gen$((16#$s & 15)) x$(( (16#$s >> 4) & 63 )), port Gen$((16#$p & 15)). Parking TLS 3 both ends (no retrain)."
+  setpci -s $RP CAP_EXP+30.w=0003:000f; setpci -s $G CAP_EXP+30.w=0003:000f; exit 5; fi
+say "GEN4 x$(( (16#$s >> 4) & 63 )) at both ends. Settle 60 s, sample every 5 s."
+for i in $(seq 1 12); do sleep 5; l=$(info); echo "$(date +%T) settle $i: $l"; s=$(st $G); [ "$s" = LOST ] && { say "LOST in settle"; exit 2; }; [ $((16#$s & 15)) = 4 ] || { say "fell back to Gen$((16#$s & 15)) in settle"; exit 6; }; done
+say "PASS 60 s at Gen4."
+if [ -n "${CMP_PCIE_BW:-}" ]; then
+  idx=$(nvidia-smi --query-gpu=index,pci.bus_id --format=csv,noheader | tr -d " " | awk -F, -v b="00000000:${G:5:2}:00.0" 'toupper($2)==toupper(b) {print $1}')
+  say "bandwidth ($CMP_PCIE_BW):"; CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=$idx timeout 120 $CMP_PCIE_BW 2>&1 | head -n 4
+fi
+say "end: $(info)"

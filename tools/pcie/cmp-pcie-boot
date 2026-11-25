@@ -1,0 +1,54 @@
+#!/bin/bash
+# cmp-pcie-boot: at boot, take every burned CMP 170HX 8 GB card (10de:20c2) to PCIe Gen3, then to Gen4 where the card allows
+# it. Run once per boot by cmp-pcie-boot.service, after the nvidia driver is loaded and before anything uses the cards.
+#
+# Stage 1: every 0x20C2 card, one at a time: cmp-rmwalk (Gen2 -> Gen3 through the driver, 30 s settle).
+# Stage 2: every card whose PCIE_BOOT_GEN23_DISABLE reads 0 and whose link is at Gen3: cmp-e1steps (the seven E1 PHY writes,
+#          one at a time), then cmp-gen4retrain (one retrain to Gen4, 60 s settle).
+# Cards that are not burned for it are left alone: the walk refuses a card whose driver max speed is below 3, and stage 2
+# skips a card whose GEN23 fuse is still set (the E1 write 7 halted the host on such a card).
+#
+# Crash-loop guard: before a card's step a marker inflight-<bus> (stage 1) or inflight-g4-<bus> (stage 2) is written and
+# synced, and removed when the step returns. A marker left over at start means the host went down during that step last
+# boot: the card gets disabled-<bus> or disabled-g4-<bus> and is skipped from then on. A card lost during the walk (rc 2) is
+# disabled and the service stops there. Other failures are logged only (the card stays at Gen2 or Gen3).
+#   Retry a disabled card:   rm $STATE/disabled-<bus>   or   rm $STATE/disabled-g4-<bus>
+#   Skip everything:         touch $STATE/off            Skip stage 2 only:  touch $STATE/off-g4
+#
+# Settings (environment): CMP_PCIE_STATE (default /var/lib/cmp-pcie-boot), CMP_PCIE_LOG (default /var/log/cmp-pcie),
+# CMP_PCIE_BIN (default /usr/local/sbin, where cmp-rmwalk, cmp-e1steps, cmp-gen4retrain and cmp-gen23read are installed).
+# Cards are found by bus number in PCI domain 0. Messages go to stdout (the journal of the service).
+set -u
+D=${CMP_PCIE_STATE:-/var/lib/cmp-pcie-boot}; L=${CMP_PCIE_LOG:-/var/log/cmp-pcie}; BIN=${CMP_PCIE_BIN:-/usr/local/sbin}
+mkdir -p "$D" "$L"
+say() { echo "$*"; }
+cards() { nvidia-smi --query-gpu=pci.bus_id,pci.device_id --format=csv,noheader | tr -d ' ' | awk -F, '$2=="0x20C210DE" {print tolower(substr($1,10,2))}'; }
+[ -e "$D/off" ] && { say "off flag set, nothing done"; exit 0; }
+for f in "$D"/inflight-[0-9a-f][0-9a-f]; do [ -e "$f" ] || continue; b=${f##*-}; mv "$f" "$D/disabled-$b"; say "card $b: host went down during its Gen3 walk last boot; disabled"; done
+for f in "$D"/inflight-g4-*; do [ -e "$f" ] || continue; b=${f##*-}; mv "$f" "$D/disabled-g4-$b"; say "card $b: host went down during its Gen4 step last boot; Gen4 disabled"; done; sync
+for b in $(cards); do
+  [ -e "$D/disabled-$b" ] && { say "card $b disabled, skipped"; continue; }
+  : > "$D/inflight-$b"; sync
+  SETTLE=30 "$BIN/cmp-rmwalk" "$b" > /dev/null 2>&1; rc=$?
+  rm -f "$D/inflight-$b"
+  case $rc in
+    0) say "card $b Gen3 ok ($(lspci -s $b:00.0 -vv | grep -oE 'LnkSta:\s+Speed [^,]+, Width x[0-9]+' | sed -E 's/LnkSta:\s+//'))";;
+    1) say "card $b precondition not met (rc 1), left as it was";;
+    2) : > "$D/disabled-$b"; sync; say "card $b LOST during the walk (rc 2): disabled, stopping"; exit 0;;
+    *) say "card $b walk failed (rc $rc), card back at Gen2";;
+  esac
+  sync
+done
+[ -e "$D/off-g4" ] && { say "stage 2 off (off-g4)"; exit 0; }
+for b in $(cards); do
+  [ "$(python3 -I "$BIN/cmp-gen23read" 0000:$b:00.0 2>/dev/null)" = 0 ] || continue
+  [ -e "$D/disabled-g4-$b" ] && { say "card $b Gen4 disabled, skipped"; continue; }
+  s=$(setpci -s $b:00.0 CAP_EXP+12.w 2>/dev/null)
+  [[ $s =~ ^[[:xdigit:]]{4}$ ]] && [ $((16#$s & 15)) = 3 ] || { say "card $b not at Gen3 ($s), Gen4 skipped"; continue; }
+  : > "$D/inflight-g4-$b"; sync
+  python3 -I -u "$BIN/cmp-e1steps" 0000:$b:00.0 > "$L/boot-e1-$b.log" 2>&1; r1=$?
+  if [ $r1 = 0 ]; then bash "$BIN/cmp-gen4retrain" 0000:$b:00.0 > "$L/boot-g4-$b.log" 2>&1; r2=$?; else r2=-; fi
+  rm -f "$D/inflight-g4-$b"; sync
+  say "card $b Gen4: e1 rc $r1, retrain rc $r2, link $(setpci -s $b:00.0 CAP_EXP+12.w)"
+done
+exit 0

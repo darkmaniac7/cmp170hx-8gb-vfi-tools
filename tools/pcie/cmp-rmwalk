@@ -1,0 +1,51 @@
+#!/bin/bash
+# cmp-rmwalk <bus, e.g. 05>: walk one burned CMP 170HX 8 GB card (10de:20c2) from Gen2 to Gen3 through the driver (RM).
+# Needs: the card bound to the nvidia driver with RM max link speed 3 or more (per-device RMPcieLinkSpeed=0x5, see
+# tools/pcie/README.md), no compute process on it, Gen2 at both ends, and the RM speed helper cmp-pcie-speed
+# (set_pcie_speed.c from github.com/darkmaniac7/cmp170hx-10gb-pcie-gen4).
+# Walk: RM speed 1 -> check Gen1 -> RM speed 2 -> check Gen2 -> target link speed 3 on root port and card -> RM speed 3
+# -> check -> settle (SETTLE seconds, default 60, sampled every 5 s). Stops at the first surprise. Never retrains from
+# config space. Writes nothing more if the card stops answering.
+# Exit: 0 Gen3 held; 1 precondition not met (nothing changed); 2 card or port unreadable (needs a cold power cycle);
+# 3 to 6 the walk did not reach or hold Gen3 (put back at Gen2 targets where possible).
+# Log: $CMP_PCIE_LOG (default /var/log/cmp-pcie)/rmwalk-<bus>-<time>.log
+set -u
+B=${1:?bus}; B=${B,,}; G=0000:$B:00.0; RM=${CMP_PCIE_SPEED:-/usr/local/sbin/cmp-pcie-speed}
+RP=$(basename "$(dirname "$(readlink -f /sys/bus/pci/devices/$G)")")
+LD=${CMP_PCIE_LOG:-/var/log/cmp-pcie}; mkdir -p "$LD"; LOG=$LD/rmwalk-$B-$(date +%Y%m%dT%H%M%S).log
+say() { echo "$(date +%T) $*" | tee -a "$LOG"; }
+st() { local s; s=$(setpci -s "$1" CAP_EXP+12.w 2>/dev/null); [[ $s =~ ^[[:xdigit:]]{4}$ && ${s,,} != ffff ]] && echo "$s" || echo LOST; }
+gen() { [ "$1" = LOST ] && echo 0 || echo $((16#$1 & 15)); }
+wid() { [ "$1" = LOST ] && echo 0 || echo $(( (16#$1 >> 4) & 63 )); }
+xid() { journalctl -k -b --no-pager | grep -c "NVRM: Xid"; }
+regs() { echo "card $(st $G) tls $(setpci -s $G CAP_EXP+30.w) devsta $(setpci -s $G CAP_EXP+0a.w) uesta $(setpci -s $G ECAP_AER+04.l 2>/dev/null) cesta $(setpci -s $G ECAP_AER+10.l 2>/dev/null) | port $(st $RP) tls $(setpci -s $RP CAP_EXP+30.w) devsta $(setpci -s $RP CAP_EXP+0a.w) | xid $(xid)"; }
+lost() { say "STOP: card or port unreadable ($*). Writing nothing more. Needs a cold power cycle."; regs >> "$LOG"; exit 2; }
+back2() { say "back to Gen2 targets: TLS 2 both ends, RM speed 2"; setpci -s $RP CAP_EXP+30.w=0002:000f; setpci -s $G CAP_EXP+30.w=0002:000f; $RM 2 $MINOR $BUS >> "$LOG" 2>&1; sleep 1; say "$(regs)"; }
+say "== RM walk on $G (log $LOG)"
+[ "$(cat /sys/bus/pci/devices/$G/device 2>/dev/null)" = 0x20c2 ] || { say "ABORT: not 10de:20c2"; exit 1; }
+[[ $RP =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] || { say "ABORT: no parent port"; exit 1; }
+[ -x "$RM" ] || { say "ABORT: RM speed helper $RM missing"; exit 1; }
+MINOR=$(awk -F: '/Device Minor/ {gsub(/[[:space:]]/,"",$2); print $2}' /proc/driver/nvidia/gpus/$G/information 2>/dev/null); BUS=$B
+[[ $MINOR =~ ^[0-9]+$ ]] || { say "ABORT: no device minor (driver not bound?)"; exit 1; }
+IDX=$(nvidia-smi --query-gpu=index,pci.bus_id --format=csv,noheader | tr -d " " | awk -F, -v b="00000000:${B^^}:00.0" '$2==b {print $1}'); [[ $IDX =~ ^[0-9]+$ ]] || { say "ABORT: no nvidia-smi index"; exit 1; }
+GM=$(nvidia-smi -i $IDX --query-gpu=pcie.link.gen.max --format=csv,noheader | tr -d " "); [[ $GM =~ ^[0-9]+$ ]] && [ $GM -ge 3 ] || { say "ABORT: RM max is $GM, not 3 or more"; exit 1; }
+[ -z "$(nvidia-smi --query-compute-apps=gpu_bus_id --format=csv,noheader | grep -i "$B:00")" ] || { say "ABORT: a compute process is on $B:00"; exit 1; }
+X0=$(xid); S0=$(st $G); P0=$(st $RP); W0=$(wid $S0)
+[ "$(gen $S0)" = 2 ] && [ "$(gen $P0)" = 2 ] && [ "$W0" -ge 4 ] || { say "ABORT: link is not Gen2 at both ends ($S0 / $P0)"; exit 1; }
+say "idx $IDX minor $MINOR port $RP RM max $GM width x$W0, start: $(regs)"
+$RM 0 $MINOR $BUS >> "$LOG" 2>&1 || { say "ABORT: helper cannot find the GPU"; exit 1; }
+say "-- RM speed 1"; $RM 1 $MINOR $BUS >> "$LOG" 2>&1; r=$?; sleep 1; S=$(st $G); [ "$S" = LOST ] && lost "after RM 1"
+say "rc $r: $(regs)"
+[ $r = 0 ] && [ "$(gen $S)" = 1 ] || { say "STOP: RM speed 1 did not give Gen1 (rc $r). The driver does not control this link."; [ "$(gen $S)" = 2 ] || back2; exit 3; }
+say "-- RM speed 2"; $RM 2 $MINOR $BUS >> "$LOG" 2>&1; r=$?; sleep 1; S=$(st $G); [ "$S" = LOST ] && lost "after RM 2"
+say "rc $r: $(regs)"
+[ $r = 0 ] && [ "$(gen $S)" = 2 ] && [ "$(wid $S)" = $W0 ] || { say "STOP: RM speed 2 did not bring Gen2 x$W0 back (rc $r)"; exit 4; }
+say "-- TLS 3 on $RP and $G, then RM speed 3"
+setpci -s $RP CAP_EXP+30.w=0003:000f; setpci -s $G CAP_EXP+30.w=0003:000f
+$RM 3 $MINOR $BUS >> "$LOG" 2>&1; r=$?; sleep 1; S=$(st $G); P=$(st $RP); [ "$S" = LOST ] && lost "after RM 3"
+say "rc $r: $(regs)"
+if [ $r != 0 ] || [ "$(gen $S)" != 3 ] || [ "$(gen $P)" != 3 ] || [ "$(wid $S)" -lt $W0 ]; then say "Gen3 not established (rc $r, card $S, port $P)"; back2; exit 5; fi
+N=$(( ${SETTLE:-60} / 5 )); [ $N -ge 2 ] || N=2; say "Gen3 x$(wid $S) at both ends. Settle $((N*5)) s, sample every 5 s."
+for i in $(seq 1 $N); do sleep 5; S=$(st $G); [ "$S" = LOST ] && lost "settle sample $i"; line=$(regs); echo "$(date +%T) settle $i: $line" >> "$LOG"
+  ue=$(setpci -s $G ECAP_AER+04.l 2>/dev/null); if [ "$(gen $S)" != 3 ] || [ "$(wid $S)" -lt $W0 ] || { [ -n "$ue" ] && [ "$ue" != 00000000 ]; } || [ "$(xid)" != "$X0" ]; then say "STOP in settle $i: $line"; back2; exit 6; fi; done
+say "PASS: Gen3 held $((N*5)) s. $(regs)"; lspci -s $G -vv | grep -E "LnkCap:|LnkSta:|LnkCtl2:" | tee -a "$LOG"

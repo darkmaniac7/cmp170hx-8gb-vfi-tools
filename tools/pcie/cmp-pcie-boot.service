@@ -1,0 +1,17 @@
+[Unit]
+Description=CMP 170HX: burned 8 GB cards to PCIe Gen3, then Gen4 where the card allows it
+After=systemd-modules-load.service local-fs.target
+# Start your miner or inference units after this one so they start on the final link speed (the walk refuses a card
+# with a compute process on it), for example:
+# Before=my-miner.service my-inference.service
+ConditionPathExists=!/var/lib/cmp-pcie-boot/off
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cmp-pcie-boot
+RemainAfterExit=yes
+# About 40 s per card for Gen3 and about 90 s more per card for Gen4.
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

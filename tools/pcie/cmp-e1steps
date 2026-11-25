@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+# cmp-e1steps <card bdf>: the Gen4 PHY init (E1) on a burned CMP 170HX 8 GB card (10de:20c2), with the driver bound and the
+# link at Gen3 at both ends. Seven read-modify-writes in BAR0, one at a time, non-link registers first and the link-rate
+# registers last. After each write: readback, LnkSta and AER UESta at both ends, Xid count; it stops at the first unreadable
+# link, speed or width change, or new Xid. It never retrains; cmp-gen4retrain does that afterwards.
+#
+# Refuses unless: device 0x20c2, PCIE_BOOT_GEN23_DISABLE (0x82057c) reads 0, DISABLE_SW_OVERRIDE (0x820084) bit 0 reads 1,
+# no compute process on the card, Gen3 at both ends. A card whose GEN23 fuse is still set halted the host at write 7.
+#
+# Every register access is one aligned 32-bit load or store (memoryview cast). Do not use struct.pack_into on a BAR0
+# mapping: it zeroes the destination before packing, so each write first stores 0x00000000. With LINK_CONFIG_0 that
+# transient knocked the link out and an AMD EPYC host answered with a sync flood (whole-host halt).
+#
+# Before write 7 (LINK_CONFIG_0) it sets Hardware Autonomous Speed Disable (LnkCtl2 bit 5) on card and root port, then
+# keeps 3 s with no BAR0 access and reads the root port before the card.
+#
+# Output is unbuffered so a remote caller keeps every line even if the host goes down.
+# CMP_SYSFS (default /sys) is only for tests.
+import mmap, os, pathlib, subprocess, sys, time
+
+SYSFS = os.environ.get("CMP_SYSFS", "/sys")
+G = sys.argv[1].lower()
+P = pathlib.Path(SYSFS) / "bus/pci/devices" / G
+RP = os.path.basename(os.path.dirname(os.path.realpath(P)))
+
+
+def sp(d, r):
+    o = subprocess.run(["setpci", "-s", d, r], capture_output=True, text=True).stdout.strip()
+    return o if o and o.lower() not in ("ffff", "ffffffff") else "LOST"
+
+
+def xid():
+    return subprocess.run("journalctl -k -b --no-pager | grep -c 'NVRM: Xid'", shell=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def link():
+    return f"card {sp(G,'CAP_EXP+12.w')} ue {sp(G,'ECAP_AER+04.l')} | port {sp(RP,'CAP_EXP+12.w')} ue {sp(RP,'ECAP_AER+04.l')} | xid {xid()}"
+
+
+def say(s):
+    print(time.strftime("%H:%M:%S ") + s, flush=True)
+
+
+if (P / "device").read_text().strip() != "0x20c2":
+    say("ABORT: not a 10de:20c2 card"); sys.exit(1)
+CYA_CLR = (1 << 0) | (1 << 2) | (1 << 3) | (1 << 13) | (1 << 23)
+STEPS = [
+    ("VSEC_HIER 0x88610 |= 0x1001",                    0x88610, lambda v: v | 0x1001),
+    ("PRIV_MISC_1 0x8841C set 11,13 clr 12,14,30,31",  0x8841C, lambda v: (v | (1 << 11) | (1 << 13)) & ~((1 << 12) | (1 << 14) | 0xC0000000) & 0xffffffff),
+    ("CYA_0 0x8C2C0 clr 0,2,3,13,23",                  0x8C2C0, lambda v: v & ~CYA_CLR & 0xffffffff),
+    ("88CE4 low byte = 0x14 (RMW)",                    0x88CE4, lambda v: (v & ~0xFF) | 0x14),
+    ("88CE0 bits 5:0 = 6",                             0x88CE0, lambda v: (v & ~0x3F) | 0x06),
+    ("PL_LINK_RATE 0x8C1C0 bits 19:16 = 4",            0x8C1C0, lambda v: (v & ~0x000F0000) | (4 << 16)),
+    ("LINK_CONFIG_0 0x8C040 bits 19:18 = 0",           0x8C040, lambda v: v & ~0x000C0000 & 0xffffffff),
+]
+apps = subprocess.run(["nvidia-smi", "--query-compute-apps=gpu_bus_id", "--format=csv,noheader"], capture_output=True,
+                      text=True).stdout
+if G[5:] in apps.lower():
+    say("ABORT: a compute process is on the card"); sys.exit(1)
+s0 = sp(G, "CAP_EXP+12.w"); p0 = sp(RP, "CAP_EXP+12.w")
+if "LOST" in (s0, p0) or int(s0, 16) & 15 != 3 or int(p0, 16) & 15 != 3:
+    say(f"ABORT: link not Gen3 at both ends ({s0}/{p0})"); sys.exit(1)
+W0 = (int(s0, 16) >> 4) & 63; X0 = xid()
+fd = os.open(P / "resource0", os.O_RDWR | os.O_SYNC)
+m = mmap.mmap(fd, 0x824000, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ | mmap.PROT_WRITE)
+mv = memoryview(m).cast("I")          # one aligned 32-bit load or store per access, no zero fill
+
+
+def rd(o):
+    return mv[o >> 2]
+
+
+def wr(o, v):
+    mv[o >> 2] = v & 0xffffffff
+
+
+gen23, dsov = rd(0x82057c), rd(0x820084)
+say(f"start {G} port {RP} width x{W0}: MAGIC_D {rd(0x820520):08x} DSOV {dsov:08x} GEN23 {gen23:08x} LnkCap(int) {rd(0x88084):08x} LnkCap2(int) {rd(0x880A4):08x} | {link()}")
+if gen23 != 0:
+    say(f"ABORT: PCIE_BOOT_GEN23_DISABLE reads {gen23:08x}, not 0. On such a card write 7 halted the host. Burn its GEN23 record first."); sys.exit(1)
+if dsov == 0xFFFFFFFF or (dsov & 0xFFFF0000) == 0xBADF0000 or not dsov & 1:
+    say(f"ABORT: DISABLE_SW_OVERRIDE reads {dsov:08x}; expected bit 0 set on a cold-booted card"); sys.exit(1)
+for name, reg, f in STEPS:
+    old = rd(reg)
+    if old == 0xFFFFFFFF or (old & 0xFFFF0000) == 0xBADF0000:
+        say(f"STOP before {name}: read {old:08x}"); sys.exit(2)
+    new = f(old)
+    if new == old:
+        say(f"skip {name}: already {old:08x}"); continue
+    say(f"-> {name}: {old:08x} -> {new:08x}")
+    if reg == 0x8C040:
+        for d in (RP, G):
+            subprocess.run(["setpci", "-s", d, "CAP_EXP+30.w=0020:0020"])
+        say("   HASD set: card LnkCtl2 " + sp(G, "CAP_EXP+30.w") + " port LnkCtl2 " + sp(RP, "CAP_EXP+30.w") + "; writing LINK_CONFIG_0, then 3 s with no BAR0 access")
+        wr(reg, new); say("   stored (single 32-bit store); 3 s quiet")
+        time.sleep(3.0)
+        ps = sp(RP, "CAP_EXP+12.w"); pue = sp(RP, "ECAP_AER+04.l"); say(f"   port check first: LnkSta {ps} UE {pue}")
+        if ps == "LOST" or int(ps, 16) & 15 != 3 or pue != "00000000":
+            say("STOP: port not healthy after write 7; not touching the card"); sys.exit(4)
+        back = rd(reg); time.sleep(0.5)
+    else:
+        wr(reg, new); time.sleep(0.05); back = rd(reg); time.sleep(1.0)
+    l = link(); say(f"   readback {back:08x} ({'stuck' if back == new else 'DID NOT STICK'}) | {l}")
+    s = sp(G, "CAP_EXP+12.w"); p = sp(RP, "CAP_EXP+12.w")
+    if "LOST" in (s, p) or int(s, 16) & 15 != 3 or (int(s, 16) >> 4) & 63 != W0 or xid() != X0:
+        say(f"STOP after {name}: link or Xid changed; no more writes"); sys.exit(3)
+say(f"done: LnkCap(int) {rd(0x88084):08x} LnkCap2(int) {rd(0x880A4):08x} LnkCtl2(int) {rd(0x880A8):08x} | config LnkCap {sp(G,'CAP_EXP+0c.l')} LnkCap2 {sp(G,'CAP_EXP+2c.l')} | {link()}")
