@@ -14,8 +14,8 @@ On the lab's EPYC server, at every boot:
 | Pinned host copies, per card | about 6.5 GB/s | about 13 GB/s | 22.4 to 25.1 GB/s |
 | GPU to GPU (P2P), per pair | | 13.15 GB/s | 20.2 to 26.2 GB/s |
 
-Five of its seven burned cards reach Gen4 x16 at each boot, 0 Xid, 0 AER. The other two sit in slots where the guard
-disabled the Gen4 step during testing (one of those slots logs correctable errors even at Gen3); they run at Gen3.
+Six of its seven burned cards reach Gen4 x16 at each boot, 0 Xid, 0 AER. The seventh sits in a slot whose 16 GT/s
+signal margin drops link equalization (it logs correctable errors even at Gen3); the guard keeps that slot at Gen3 x16.
 What it is worth: a large model's cold prefill went up 15 percent from Gen3 to
 Gen4; decode went up 0.3 to 1 percent (decode is not link bound).
 
@@ -137,7 +137,8 @@ Gen4, so seven cards take about 12 minutes. Per-card logs: `/var/log/cmp-pcie/` 
 `inflight-g4-<bus>` for Gen4) in `/var/lib/cmp-pcie-boot` and syncs it; it removes the marker when the step returns. If
 the host went down during a step, the marker is still there at the next boot: that card's step is disabled
 (`disabled-<bus>` or `disabled-g4-<bus>`) and skipped from then on, and the rest of the cards go on as normal. A card
-lost during the Gen3 walk is disabled and the service stops there.
+lost off the bus during the Gen3 walk or the Gen4 retrain (`rc 2`, or an unreadable `LnkSta`) also gets `disabled-<bus>`
+or `disabled-g4-<bus>` and stops the service so the next cold boot skips the step that dropped it.
 
 | To | Do |
 |---|---|
@@ -160,10 +161,11 @@ The markers are keyed by bus number, so they follow the slot, not the card. Card
   logged Xid 140. Reboot for each new attempt.
 - **One retrain per attempt.** If Gen4 does not come up, the scripts park the targets at 3 and stop. Another try needs a
   reboot.
-- **Some slots are worse than others.** On the lab's server two different cards failed the Gen4 step in the same slot,
-  and another slot logs correctable errors even at Gen3. Leave a card at Gen3 in such a slot (the guard does it for you
-  after a halt; `touch` its `disabled-g4-<bus>` to do it by hand) or move it. `cmp-linkmon` shows slots that keep
-  logging correctable errors.
+- **Some slots are worse than others.** On the lab's server six slots hold Gen4 x16 cleanly once the writer was fixed,
+  while one slot (shared fan shroud, correctable RxErr and replay timeouts even at Gen3) passes all seven E1 writes and
+  then drops the card (`Xid 79`) when the root port retrains to 16 GT/s. Leave a card at Gen3 in such a slot (the guard
+  disables Gen4 after a halt or a lost link; `touch` its `disabled-g4-<bus>` to do it by hand) or reseat/move it.
+  `cmp-linkmon` shows slots that keep logging correctable errors.
 - **Start the cards' users after the service.** The walk refuses a card with a compute process on it.
 - **The 10 GB card (`10de:2082`)** has a different route (x4 link, driver patches, a software fuse override):
   [cmp170hx-10gb-pcie-gen4](https://github.com/darkmaniac7/cmp170hx-10gb-pcie-gen4). These scripts refuse it.

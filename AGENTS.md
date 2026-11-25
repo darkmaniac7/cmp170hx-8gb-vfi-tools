@@ -169,6 +169,7 @@ run log. Keep the journal on the person's machine; it can hold card identities.
 | | |
 |---|---|
 | `README.md` | overview, the CiMP section (both ways to run it), setup, safety behavior, status |
+| `docs/GUIDE.md` | start-to-finish guide: candidate check, bench, plan, glitch, hand-off, cold verify, 80 GB and Gen4 |
 | `docs/CIMP.md` | every `cimp` command, setting, profile and the watch panel |
 | `docs/SWEET_SPOT.md` | the search strategy with worked examples (cards G and H) |
 | `docs/OVERLAP_EDGE.md`, `docs/PUSH3.md` | the push3 overlap shot (card E) and how to flash push3 |
@@ -176,6 +177,8 @@ run log. Keep the journal on the person's machine; it can hold card identities.
 | `docs/AUTONOMOUS_AGENT.md` | what an agent controls, its guard rails, what stays with people |
 | `docs/METHOD.md`, `docs/MEASUREMENTS.md` | why the method is what it is, and what the bench measured |
 | `firmware/README.md` | the twelve firmware and host patches |
+| `tools/pcie/README.md` | after the burn: PCIe Gen3 and Gen4 boot service and scripts |
+| `driver/README.md` | after the burn: `fb-geometry-80g.patch` for 80 GiB under cmpunlocker |
 
 ## Working on this repository
 

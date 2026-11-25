@@ -5,7 +5,8 @@ memory layout and a PCIe Gen4 link, in the order the lab did it on seven cards i
 what is spread over this repository and over [cmp.wiki](https://cmp.wiki), and links the long pages instead of
 copying them. Cards are named by their letter on the cmp.wiki
 [results page](https://cmp.wiki/wiki/Voltage-glitch_unlock:_lab_results_and_fuse_findings). The hosts are the lab's
-bench (an Intel Core i9-13900K desktop) and the lab's EPYC server (dual-socket AMD EPYC, eight cards).
+bench (an Intel Core i9-13900K desktop at first, then an ASRock Rack B650D4U with an AMD Ryzen 7 9800X3D for x16 and
+IPMI power control) and the lab's EPYC server (dual-socket AMD EPYC, eight cards).
 
 The work has three phases. **Before the glitch** you check that the card is worth it, build the bench, flash the
 firmware, take a cold baseline and write the whole burn plan. **The glitch** is the search for one "goldilocks" boot
@@ -27,8 +28,8 @@ What the lab's cards ended up with, every value read after a cold boot:
 | H | 70 | 118 (122) | 122 | 80 GB layout (FBP disable `0x24`), 81920 MiB | 16 GT/s x16 | 16, then the GEN23 record |
 
 "Before" is the fuse floor of every stock 8 GB card: 70 SMs (74 with cmpunlocker's override) and 64 GB. The SM
-ceiling counts the TPCs not marked defective. On the lab's EPYC server five of these cards train Gen4 x16 at every
-boot; the other two sit in slots where the guard turned the Gen4 step off during testing, and run at Gen3
+ceiling counts the TPCs not marked defective. On the lab's EPYC server six of these cards train Gen4 x16 at every
+boot; the seventh sits in one marginal slot where the guard keeps Gen4 off, and runs at Gen3 x16
 ([section 4.4](#44-pcie-gen2-gen3-gen4)).
 
 > **This repository glitches and reads. It never burns.** No tool here senses, arms or burns fuses, and no burn tool,
@@ -136,14 +137,16 @@ The card leaves the factory training x4: the AC-coupling capacitors of lanes 4 t
 - **For the glitch, any link that enumerates will do.** The lab's bench ran the card flat on a SlimSAS riser in a
   chipset slot, at Gen1 x8.
 - **For Gen4 later, the path matters.** Prefer direct CPU lanes and short, good cables (one member's rule of thumb at
-  PCIe 4: "50cm or less passive"). Some slots will not hold 16 GT/s: on the lab's EPYC server two different cards
-  failed Gen4 in one slot, another slot logs correctable errors even at Gen3, and the cards there stay at Gen3.
+  PCIe 4: "50cm or less passive"). Some slots will not hold 16 GT/s: on the lab's EPYC server six slots hold Gen4 x16 cleanly, while one slot logs
+  correctable errors at Gen3 and drops equalization (`Xid 79`) on the 16 GT/s retrain, so the card there stays at Gen3.
 - A retrain that ends at 2.5 GT/s "(downgraded)" points at the signal path (riser, cable or slot), not at settings.
 - More: [Risers and bifurcation](https://cmp.wiki/wiki/Risers_and_bifurcation).
 
 ### 1.5 The bench host
 
-The lab glitched on its bench: an Intel Z790 desktop board with a Core i9-13900K, on Linux. One member finished
+The lab started on an Intel Z790 desktop board with a Core i9-13900K (SlimSAS riser, manual power cycles) and then
+moved the bench to an ASRock Rack B650D4U server board with an AMD Ryzen 7 9800X3D (direct x16 slot, BMC IPMI power
+cycles), on Linux. One member finished
 his first card on an old Intel desktop after an AMD EPYC server fought him; another found an X99 board the most
 stable of three. Whatever you use, you must be able to power cycle it:
 every poison without the in-boot reset, every controller latch and every lost link on an already-burned card costs a
@@ -526,7 +529,7 @@ into the glitch entry, and read again with `tools/vfi_snap.py --rows`:
 | FBIO and ROP_L2 disables (the FBPA mask decodes from the FF rows) | `0xC03000` with FBP `0x840`; `0xC30` on card H. FBP n owns bits 2n and 2n+1 |
 | `PCIE_MAGIC_BITS_D` (`0x820520`) | `0x14680000` |
 | `OPT_PCIE_BOOT_GEN3_DIS` (`0x820580`), `OPT_DISABLE_GEN3_SPEED` (`0x820250`) | 0, 0 |
-| `OPT_PCIE_BOOT_GEN23_DIS` (`0x82057C`) | 0. `vfi_snap.py` does not read it; `tools/pcie/cmp-gen23read <bdf>` does, and the cold `LnkCap` shows it (16 GT/s cleared, 2.5 GT/s still fused) |
+| `OPT_PCIE_BOOT_GEN23_DIS` (`0x82057C`) | 0 (`tools/vfi_snap.py` and `tools/pcie/cmp-gen23read <bdf>` both read it; the cold `LnkCap` shows 16 GT/s cleared, 2.5 GT/s still fused) |
 | `lspci -vv` on the cold card | `LnkCap` 16 GT/s x16, `LnkCap2` 2.5 to 16 GT/s; XVE LnkCap (`0x88084`) `0x00456104` |
 
 Keep the new read private like the first one.
@@ -610,8 +613,9 @@ step after it. [`tools/pcie/`](../tools/pcie/README.md) is the kit the lab's EPY
 - **At every boot:** stage 1 walks each `0x20C2` card to Gen3 through the driver; stage 2, on the cards whose GEN23
   reads 0, does the seven E1 writes and one retrain to Gen4. A marker file per card is written before each step and
   removed after it; a marker left over at boot means the host went down during that card's step, and that card is
-  skipped from then on. Five of the seven burned cards reach Gen4 x16 at every boot, with 0 Xid and 0 AER; the
-  other two sit in slots where the guard disabled the Gen4 step during testing, and run at Gen3. Start the cards'
+  skipped from then on, as is a card lost off the bus (`rc 2`) during a step. Six of the seven burned cards reach Gen4
+  x16 at every boot, with 0 Xid and 0 AER; the seventh sits in a slot whose 16 GT/s margin drops equalization
+  (`Xid 79`), so the guard keeps it at Gen3 x16. Start the cards'
   users after the service: the walk refuses a card with a compute process on it.
 
 Traps:
@@ -689,7 +693,7 @@ cap (for example `nvidia-smi -pl 180`) during tests is common practice.
 | DSOV reads 0 just before the driver binds | the card has not been power cycled since a glitch | do not load the driver; power the host fully off |
 | Cold `LnkCap` stays 2.5 GT/s on a burned card | `OPT_PCIE_BOOT_GEN23_DIS` still fused | Gen3 through the driver walk only; never the E1. Clearing it needs one more glitch session |
 | The host halts (sync flood) at E1 write 7 | a writer that stores zero first (`struct.pack_into`), or GEN23 still 1 | the v3 writer in `tools/pcie/`; never the E1 on a GEN23 1 card |
-| The Gen4 retrain fails in one slot | that slot or riser (two different cards failed Gen4 in the same slot on the lab's server) | leave that card at Gen3 (the kit's guard does after a halt); another slot or a shorter path |
+| The Gen4 retrain fails or drops the card (`Xid 79`) in one slot | 16 GT/s margin or seating in that slot or riser (one coupled-shroud slot on the lab's server passes E1 and drops equalization) | leave that slot at Gen3 (the kit's guard disables Gen4 after a halt or a lost link); reseat, clean the edge fingers, or move slots |
 | x16 at Gen2, x8 at Gen4 | a marginal capacitor joint | redo the joints |
 | Driver rebind at Gen4: probe -5, BAR0 `0xbadf1020`, Xid 140 | unbind and rebind at Gen4 | reboot instead |
 | `nvidia-smi` says Gen3 on a 16 GT/s link | RM cached the link at boot | judge by `LnkSta` and a pinned copy test |

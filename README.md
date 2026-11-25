@@ -20,7 +20,7 @@ boot; cards E and C were then checked under a driver (81920 MiB, 110 and 124 SMs
 every one of them also got one more record, PCIE_BOOT_GEN23_DISABLE, so they now come up advertising 16 GT/s at a cold
 boot; on cards that were already burned, the shot that hit was a single slow dip, two or three shots per card (see
 [CiMP](#cimp-the-whole-bench-behind-one-command)). All seven now run in the lab's EPYC server at 81920 MiB each, with
-the driver patch in [`driver/`](driver/README.md), and five of them at PCIe Gen4 x16 from every boot with
+the driver patch in [`driver/`](driver/README.md), and six of them at PCIe Gen4 x16 from every boot with
 [`tools/pcie/`](tools/pcie/README.md). The cards fell to four routes:
 
 - **Card G:** the community pulse train.
