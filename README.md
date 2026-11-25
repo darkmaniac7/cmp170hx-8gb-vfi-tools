@@ -8,6 +8,10 @@ It plans each phase, power-cycles the bench, shoots, reads the logs, picks the n
 is held, through one command, `cimp`. You do the physical work (cards, harness, probe, fan) and every burn decision.
 Every step also works by hand. Both ways are laid out under [CiMP](#cimp-the-whole-bench-behind-one-command).
 
+**New here? Start with [`docs/GUIDE.md`](docs/GUIDE.md):** the whole route in order, from choosing and preparing a
+card, through the glitch and the hand-off to the burn, to what comes after it: checking the card, 80 GB under the
+driver ([`driver/`](driver/README.md)) and PCIe Gen3 and Gen4 at every boot ([`tools/pcie/`](tools/pcie/README.md)).
+
 With this glitch setup, and a separate burn step that is not part of this repository, the lab finished seven
 8 GB cards in November 2026. Compute went from 70 SMs to 122, 122, 120, 118 and 108 on the first five (126, 126, 124,
 122 and 112 with the RECONFIG override), and on 2026-11-21 to 106 on card E (ceiling 110) and 120 on card C (ceiling
@@ -15,7 +19,9 @@ With this glitch setup, and a separate burn step that is not part of this reposi
 boot; cards E and C were then checked under a driver (81920 MiB, 110 and 124 SMs with the override). On 2026-11-21
 every one of them also got one more record, PCIE_BOOT_GEN23_DISABLE, so they now come up advertising 16 GT/s at a cold
 boot; on cards that were already burned, the shot that hit was a single slow dip, two or three shots per card (see
-[CiMP](#cimp-the-whole-bench-behind-one-command)). The cards fell to four routes:
+[CiMP](#cimp-the-whole-bench-behind-one-command)). All seven now run in the lab's EPYC server at 81920 MiB each, with
+the driver patch in [`driver/`](driver/README.md), and five of them at PCIe Gen4 x16 from every boot with
+[`tools/pcie/`](tools/pcie/README.md). The cards fell to four routes:
 
 - **Card G:** the community pulse train.
 - **Card H:** where that train did not work, by mapping where the glitch lands in the GPU's boot and then slowing the
@@ -42,6 +48,8 @@ and the hunter behind one command. One-step dither (`revert` 2) is in the firmwa
 > record can brick a card, and no burn tool, burn planner or per-card plan is included here. A glitch by itself
 > changes nothing permanent: a power cycle returns an unburned card to stock. You probe a powered card's board with
 > needles and pull its reset line; a slipped probe can damage the card or the host. Use at your own risk.
+> The after-the-burn parts write only volatile state: `tools/pcie/` writes PCIe registers of a finished card under the
+> driver (redone at every boot; a wrong step can halt the host), and `driver/` changes how the driver sizes memory.
 
 ## CiMP: the whole bench behind one command
 
@@ -175,7 +183,10 @@ or the file `vfi_snap.py --rows` writes): then a different card in the slot stop
 | `tools/vfi_hunt.py` | Stop-and-hold hunter: shots at one setting until a clean goldilocks, which it leaves held |
 | `tools/vfi_edge.py` | Edge tracker: walks the train timing along a card's lethal edge in short cells, with a crash budget |
 | `tools/vfi_common.py` | Shared code: park, poison-safe classify, bounds, the no-dip check, per-boot shot ledger |
-| `tests/` | Offline tests against a simulated Pico, voltage controller and card, a fake `ga100vfi` package for the runner, and fake `ssh`/`scp`/power tools for the launchers |
+| `tools/pcie/` | After the burn: PCIe Gen3, then Gen4, at every boot on finished cards, as the lab runs it on its EPYC server. A systemd service with a crash-loop guard, the driver walk to Gen3 (`cmp-rmwalk`), the seven E1 PHY writes with single 32-bit stores (`cmp-e1steps`, refuses a card whose `OPT_PCIE_BOOT_GEN23_DIS` is still set), one retrain to Gen4, a Gen3/Gen4 switch and a link monitor; see `tools/pcie/README.md` |
+| `driver/` | After the burn: `fb-geometry-80g.patch` for the cmpunlocker driver (open-gpu-kernel-modules 615.71.09). It gives a card 80 GiB only when the card's own masks show 10 of 12 FB partitions active, keeps 64 GiB otherwise, with a kill switch and a log-only mode; see `driver/README.md` |
+| `tests/` | Offline tests against a simulated Pico, voltage controller and card, a fake `ga100vfi` package for the runner, fake `ssh`/`scp`/power tools for the launchers, and a fake sysfs, BAR0 and `setpci` for `tools/pcie/` |
+| `docs/GUIDE.md` | Start here: the whole route from candidate card to Gen4 x16 at 80 GiB, in order, with checklists, the troubleshooting table and where to read more |
 | `docs/OVERLAP_EDGE.md` | What finished card E: the map of the release-edge window push3 opened, the shot, and how to scan it on another card |
 | `docs/PUSH3.md` | The push3 firmware change: what changed, why it is safe, how it was checked, how to flash it and the BOOTSEL trap |
 | `docs/CIMP.md` | CiMP: commands, every setting, profiles, environment variables, ssh keys and passwords, the watch panel |
@@ -434,6 +445,15 @@ privilege mask stuck at `0xFFFFFEFE`; a sense on one of them poisoned the contro
   the offline tests and had not run on a card in this exact form when published (2026-11-21).
 - `tools/vfi_*.py` are cleaned-up, generic versions of earlier bench scripts. They pass the offline tests and had
   not run on a card in this form when published (2026-11-19).
+- `tools/pcie/` (2026-11-25) is the boot service and scripts the lab's EPYC server has run at every boot since
+  2026-11-22, with its paths turned into settings and the service renamed. Two refusals were added to `cmp-e1steps`
+  (a card whose `OPT_PCIE_BOOT_GEN23_DIS` reads 1, or whose DSOV bit 0 reads 0); the boot service already skipped the
+  first. They pass the offline tests (`tests/test_pcie.py`); they had not run on a card in this exact form when
+  published.
+- `driver/fb-geometry-80g.patch` (2026-11-25): its geometry code is byte-identical to the code in the driver the lab's
+  EPYC server runs on seven 80 GB cards (built on the Morrowmake fork of cmpunlocker). On mainstream cmpunlocker
+  `2c7e2ec` it applies with no fuzz and builds with no new warnings; a module built that way had not been loaded on a
+  card when published.
 
 Reports welcome.
 
@@ -448,6 +468,7 @@ GA100VFI_HOST=/path/to/pico-ga100vfi/host python3 -I tests/test_runner.py
 python3 -I tests/test_launchers.py
 python3 -I tests/test_hunter.py
 python3 -I tests/test_cimp.py
+python3 -I tests/test_pcie.py                             # tools/pcie/, no hardware, about 50 s
 tools/hostsim/run.sh /path/to/pico-ga100vfi HEAD~2        # with 0001-0012 applied: push2 (0010) against push3
 (cd tools/planner/tests && python3 -I -m unittest discover -s . -t .)
 (cd /path/to/pico-ga100vfi/host && python3 -m unittest test_classify test_passive_snapshot test_serial_response)
