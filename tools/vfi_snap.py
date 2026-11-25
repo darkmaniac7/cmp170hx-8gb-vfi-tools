@@ -43,7 +43,8 @@ REGS = {
     "FBP_DISABLE": 0x820364, "FBP_R_820368": 0x820368, "FBP_DEFECTIVE": 0x8205CC, "FBPA_DEFECTIVE": 0x8205D0,
     "FBP_STATUS": 0x820D38, "FBIO_DISABLE": 0x82036C, "FBIO_DEFECTIVE": 0x8205D4,
     "ROP_L2_DISABLE": 0x8202C4, "ROP_L2_DEFECTIVE": 0x8205E8, "FB_CFG1_9a0204": 0x9A0204, "FB_LMR_100ce0": 0x100CE0,
-    "OPT_DISABLE_GEN3_SPEED": 0x820250, "OPT_PCIE_MAGIC_BITS_D": 0x820520, "OPT_PCIE_BOOT_GEN3_DIS": 0x820580,
+    "OPT_DISABLE_GEN3_SPEED": 0x820250, "OPT_PCIE_MAGIC_BITS_D": 0x820520,
+    "OPT_PCIE_BOOT_GEN23_DIS": 0x82057C, "OPT_PCIE_BOOT_GEN3_DIS": 0x820580,
 }
 ALIASES = [0x820148, 0x820E20, 0x8207F4, 0x820158, 0x820324, 0x820434, 0x821108, 0x821058, 0x82074C,
            0x8206FC, 0x820644, 0x820640, 0x820410, 0x82063C, 0x820B98, 0x8205A8, 0x821064]
@@ -281,8 +282,8 @@ def snapshot(a, ident, cfg_cmd, mv32) -> int:
     print(f"  GPC dis/def/st={s['GPC_DISABLE']}/{s['GPC_DEFECTIVE']}/{s['GPC_STATUS']} "
           f"FBP dis/def/st={s['FBP_DISABLE']}/{s['FBP_DEFECTIVE']}/{s['FBP_STATUS']} "
           f"SM now={out['sm_status_now']} ceiling={out['sm_ceiling_nondefective']} aliases_zero={out['aliases_zero']}/17")
-    print(f"  PCIe: MAGIC_BITS_D={s['OPT_PCIE_MAGIC_BITS_D']} BOOT_GEN3_DIS={s['OPT_PCIE_BOOT_GEN3_DIS']} "
-          f"DISABLE_GEN3_SPEED={s['OPT_DISABLE_GEN3_SPEED']}")
+    print(f"  PCIe: MAGIC_BITS_D={s['OPT_PCIE_MAGIC_BITS_D']} BOOT_GEN23_DIS={s['OPT_PCIE_BOOT_GEN23_DIS']} "
+          f"BOOT_GEN3_DIS={s['OPT_PCIE_BOOT_GEN3_DIS']} DISABLE_GEN3_SPEED={s['OPT_DISABLE_GEN3_SPEED']}")
     if "rows_match" in out:
         print(f"  rows: 512 x2 match={out['rows_match']} nonzero={out['rows_nonzero']} "
               f"state_unchanged={out['state_unchanged_by_row_read']}")

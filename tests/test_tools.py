@@ -504,7 +504,11 @@ class SnapTests(unittest.TestCase):
                                             "--outdir", os.path.join(d, "s")])
             self.assertEqual(rc, 0, out)
             self.assertIn("under/stock", out)
+            self.assertIn("BOOT_GEN23_DIS=", out)
             files = os.listdir(os.path.join(d, "s"))
+            import json
+            with open(os.path.join(d, "s", files[0])) as jf:
+                self.assertIn("OPT_PCIE_BOOT_GEN23_DIS", json.load(jf)["regs"])
             self.assertEqual(len(files), 1)
             self.assertEqual(os.stat(os.path.join(d, "s", files[0])).st_mode & 0o777, 0o600)
 
