@@ -14,6 +14,11 @@ driver ([`driver/`](driver/README.md)) and PCIe Gen3 and Gen4 at every boot ([`t
 
 For Petri Krohn's community reference covering the full CMP 170HX to A100 conversion (10 GB RIR and 8 GB voltage-glitch gates, BAR0 fuse-write mechanics, ordered FF and column burns, A100 VBIOS cross-flash, ECC, MIG, vGPU, SR-IOV and brick recovery), see [`docs/ALLSPARK.md`](docs/ALLSPARK.md).
 
+For the fuses themselves, [`docs/FUSES.md`](docs/FUSES.md) lists every field: its register, its place in the fuse
+chains, how to compute its value from your own read, and how sure each entry is. [`tools/fuseplan/`](tools/fuseplan/README.md)
+is an offline page that does that computation from a `vfi_snap.py --rows` read in your browser. It computes only: it
+writes nothing to a card and gives no burn commands.
+
 With this glitch setup, and a separate burn step that is not part of this repository, the lab finished seven
 8 GB cards in November 2026. Compute went from 70 SMs to 122, 122, 120, 118 and 108 on the first five (126, 126, 124,
 122 and 112 with the RECONFIG override), and on 2026-11-21 to 106 on card E (ceiling 110) and 120 on card C (ceiling
@@ -180,6 +185,7 @@ or the file `vfi_snap.py --rows` writes): then a different card in the slot stop
 | `tools/vfi_preflight.py` | Read-only checks before a session: firmware marker, who controls the rail, the card's six VRM profile registers (stops on a leftover fast value), host lockdown, driver, config space, FUSECTRL, GFW boot progress |
 | `tools/vfi_park.py` | Hold NVVDD at stock under PMBus, pulse PEX_RST, wait, read config space, hand the rail back |
 | `tools/vfi_rescue.py` | The same sequence step by step with diagnostics, for a card whose link is gone after a crash |
+| `tools/fuseplan/` | Offline fuse planner (`fuseplan.html`, one file, no network): SM and memory ceilings, the 80 GB check, the PCIe fields and, from a complete read, the FF record words in the lab order with a simulation and an export for `ffcalc sim`. Computes only; matched the lab's burned records on its seven cards |
 | `tools/vfi_snap.py` | Register snapshot (fuse status, gates, SM count, FB partitions, the PCIe option words) to a 0600 JSON file; `--rows` adds two passes over the 512 fuse rows with the controller's READ command |
 | `tools/vfi_trace.py` | NVVDD trace capture per shot with its outcome (debug firmware), back-to-back or first-shot mode |
 | `tools/vfi_hunt.py` | Stop-and-hold hunter: shots at one setting until a clean goldilocks, which it leaves held |

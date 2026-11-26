@@ -170,6 +170,8 @@ run log. Keep the journal on the person's machine; it can hold card identities.
 |---|---|
 | `README.md` | overview, the CiMP section (both ways to run it), setup, safety behavior, status |
 | `docs/GUIDE.md` | start-to-finish guide: candidate check, bench, plan, glitch, hand-off, cold verify, 80 GB and Gen4 |
+| `docs/FUSES.md` | every fuse field: register, chain, bit, how to compute its value, how sure each entry is |
+| `tools/fuseplan/` | offline fuse planner page; computes a plan for the person to review, burns nothing |
 | `docs/ALLSPARK.md` | Petri Krohn's community CMP 170HX to A100 conversion and fuse-burn reference |
 | `docs/CIMP.md` | every `cimp` command, setting, profile and the watch panel |
 | `docs/SWEET_SPOT.md` | the search strategy with worked examples (cards G and H) |

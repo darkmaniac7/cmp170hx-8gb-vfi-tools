@@ -264,6 +264,11 @@ records sit in rows 307 to 331, a different row on every card.
 - Have someone else review it. "Two models agreeing isn't verification" (@galygious).
 - Checksum the plan and the dump it was made from. `bootrun.sh` checks both on both machines every boot.
 
+Every field, where it lives and how to compute it: [`docs/FUSES.md`](FUSES.md).
+[`tools/fuseplan/`](../tools/fuseplan/README.md) computes the plan from your own `vfi_snap.py --rows` read in a browser,
+refuses partial or inconsistent reads, and exports the plan for `ffcalc sim`; on the lab's seven cards it reproduced
+every compute and memory record that was burned.
+
 The full rules, with the brick reports behind them:
 [Unlock without bricking](https://cmp.wiki/wiki/Unlock_without_bricking),
 [Fuses and floorsweep maps](https://cmp.wiki/wiki/Fuses_and_floorsweep_maps).
