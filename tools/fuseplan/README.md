@@ -75,4 +75,5 @@ Newer ffcalc (from 2026-11-24) adds opt-in fields the page does not plan (`--mig
 `--a100`: the device ID and the whole `PCIE_MAGIC_BITS_D` word). The positions of every field the page plans are
 unchanged in ffcalc master `3d157f2` (2026-11-25).
 
-The page is built from `src/` by `build.py`; edit the sources, not `fuseplan.html`.
+The page is built from `src/` by `build.py`; edit the sources, not `fuseplan.html`. Set `FUSEPLAN_PRIVATE_WORDS` (comma-separated) to
+have the suite check that none of those words appear on the page.
