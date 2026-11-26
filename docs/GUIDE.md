@@ -710,6 +710,7 @@ In this repository:
 - [`CIMP.md`](CIMP.md): every `cimp` command, setting and the watch panel.
 - [`RUNNER.md`](RUNNER.md): the per-boot runner and the launchers by hand.
 - [`AUTONOMOUS_AGENT.md`](AUTONOMOUS_AGENT.md): what an agent controls and what stays with people.
+- [`ALLSPARK.md`](ALLSPARK.md): Petri Krohn's complete CMP 170HX to A100 conversion guide (RIR and glitch gates, BAR0 fuse-write mechanics, ordered FF and column burns, A100 VBIOS cross-flash, ECC, MIG, vGPU, SR-IOV and recovery).
 - [`METHOD.md`](METHOD.md) and [`MEASUREMENTS.md`](MEASUREMENTS.md): the push2 nights and what the bench measured.
 - [`firmware/README.md`](../firmware/README.md): the twelve patches.
 - [`tools/planner/README.md`](../tools/planner/README.md): the shot ledger and the next-shot planner.
@@ -718,6 +719,7 @@ In this repository:
 
 On cmp.wiki:
 
+- [Allspark: CMP 170HX to A100 unlock guide](https://cmp.wiki/wiki/Allspark:_CMP_170HX_to_A100_unlock_guide): Petri Krohn's complete CMP 170HX to A100 unlock and rebrand reference.
 - [Voltage-glitch unlock (GA100VFI)](https://cmp.wiki/wiki/Voltage-glitch_unlock_(GA100VFI)): the community page:
   reported outcomes, glitcher builds, members' tips, the short safety rules and the brick reports.
 - [Voltage-glitch unlock: lab method on a Pico 2 W](https://cmp.wiki/wiki/Voltage-glitch_unlock:_lab_method_on_a_Pico_2_W):

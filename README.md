@@ -12,6 +12,8 @@ Every step also works by hand. Both ways are laid out under [CiMP](#cimp-the-who
 card, through the glitch and the hand-off to the burn, to what comes after it: checking the card, 80 GB under the
 driver ([`driver/`](driver/README.md)) and PCIe Gen3 and Gen4 at every boot ([`tools/pcie/`](tools/pcie/README.md)).
 
+For Petri Krohn's community reference covering the full CMP 170HX to A100 conversion (10 GB RIR and 8 GB voltage-glitch gates, BAR0 fuse-write mechanics, ordered FF and column burns, A100 VBIOS cross-flash, ECC, MIG, vGPU, SR-IOV and brick recovery), see [`docs/ALLSPARK.md`](docs/ALLSPARK.md).
+
 With this glitch setup, and a separate burn step that is not part of this repository, the lab finished seven
 8 GB cards in November 2026. Compute went from 70 SMs to 122, 122, 120, 118 and 108 on the first five (126, 126, 124,
 122 and 112 with the RECONFIG override), and on 2026-11-21 to 106 on card E (ceiling 110) and 120 on card C (ceiling
@@ -187,6 +189,7 @@ or the file `vfi_snap.py --rows` writes): then a different card in the slot stop
 | `driver/` | After the burn: `fb-geometry-80g.patch` for the cmpunlocker driver (open-gpu-kernel-modules 615.71.09). It gives a card 80 GiB only when the card's own masks show 10 of 12 FB partitions active, keeps 64 GiB otherwise, with a kill switch and a log-only mode; see `driver/README.md` |
 | `tests/` | Offline tests against a simulated Pico, voltage controller and card, a fake `ga100vfi` package for the runner, fake `ssh`/`scp`/power tools for the launchers, and a fake sysfs, BAR0 and `setpci` for `tools/pcie/` |
 | `docs/GUIDE.md` | Start here: the whole route from candidate card to Gen4 x16 at 80 GiB, in order, with checklists, the troubleshooting table and where to read more |
+| `docs/ALLSPARK.md` | Petri Krohn's complete CMP 170HX to A100 unlock guide (2026-11-18 to 2026-11-20): RIR and voltage-glitch gates, BAR0 fuse-write mechanics, ordered FF and column burns, A100 VBIOS cross-flash, ECC, MIG, vGPU, SR-IOV and recovery |
 | `docs/OVERLAP_EDGE.md` | What finished card E: the map of the release-edge window push3 opened, the shot, and how to scan it on another card |
 | `docs/PUSH3.md` | The push3 firmware change: what changed, why it is safe, how it was checked, how to flash it and the BOOTSEL trap |
 | `docs/CIMP.md` | CiMP: commands, every setting, profiles, environment variables, ssh keys and passwords, the watch panel |

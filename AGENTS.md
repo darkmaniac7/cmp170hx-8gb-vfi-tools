@@ -170,6 +170,7 @@ run log. Keep the journal on the person's machine; it can hold card identities.
 |---|---|
 | `README.md` | overview, the CiMP section (both ways to run it), setup, safety behavior, status |
 | `docs/GUIDE.md` | start-to-finish guide: candidate check, bench, plan, glitch, hand-off, cold verify, 80 GB and Gen4 |
+| `docs/ALLSPARK.md` | Petri Krohn's community CMP 170HX to A100 conversion and fuse-burn reference |
 | `docs/CIMP.md` | every `cimp` command, setting, profile and the watch panel |
 | `docs/SWEET_SPOT.md` | the search strategy with worked examples (cards G and H) |
 | `docs/OVERLAP_EDGE.md`, `docs/PUSH3.md` | the push3 overlap shot (card E) and how to flash push3 |
