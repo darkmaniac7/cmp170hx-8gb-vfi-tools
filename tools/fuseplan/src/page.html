@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>CMP 170HX fuse planner</title>
+<style>
+:root {
+  --bg: #f6f5f2; --surface: #ffffff; --text: #1d1d1b; --muted: #5f5d57; --line: #dedbd3;
+  --accent: #2f5d8a; --accent-text: #ffffff; --code-bg: #efede7;
+  --good-bg: #e8f3ea; --good-line: #2e7d45; --good-text: #1f5a31;
+  --warn-bg: #fdf3dc; --warn-line: #b7791f; --warn-text: #6b4a0d;
+  --bad-bg: #fbe7e5; --bad-line: #b3372b; --bad-text: #7d2219;
+  --info-bg: #e9eff6; --info-line: #2f5d8a; --info-text: #1f3f60;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151515; --surface: #1f1f1e; --text: #ebe9e4; --muted: #a7a49c; --line: #363531;
+    --accent: #6fa3d6; --accent-text: #0e1620; --code-bg: #2a2a28;
+    --good-bg: #17291c; --good-line: #4fae6a; --good-text: #a6dcb4;
+    --warn-bg: #2d2412; --warn-line: #d9a142; --warn-text: #f0d29a;
+    --bad-bg: #331815; --bad-line: #e0675a; --bad-text: #f3b3aa;
+    --info-bg: #172332; --info-line: #6fa3d6; --info-text: #b5d0ec;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.wrap { max-width: 980px; margin: 0 auto; padding: 20px 16px 48px; }
+h1 { font-size: 1.6rem; line-height: 1.2; margin: 8px 0 6px; letter-spacing: -0.01em; }
+h2 { font-size: 1.15rem; margin: 0 0 10px; }
+h3 { font-size: 1rem; margin: 18px 0 8px; }
+p { margin: 8px 0; }
+code, textarea, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.92em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.sub { color: var(--muted); margin-top: 0; }
+.muted { color: var(--muted); }
+.ok { color: var(--good-text); font-weight: 600; }
+.bad { color: var(--bad-text); font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 16px 0; }
+.danger { background: var(--bad-bg); border: 2px solid var(--bad-line); color: var(--bad-text); border-radius: 10px; padding: 14px 16px; margin: 16px 0; }
+.danger h2 { color: var(--bad-text); margin-bottom: 6px; }
+.danger ul { margin: 6px 0; padding-left: 20px; }
+.danger code { background: transparent; border: 1px solid var(--bad-line); }
+.privacy { background: var(--info-bg); border-left: 4px solid var(--info-line); color: var(--info-text); padding: 10px 14px; border-radius: 6px; }
+.banner { border-radius: 8px; padding: 12px 14px; margin: 16px 0; border-left: 5px solid; font-weight: 400; }
+.banner ul { margin: 6px 0 0; padding-left: 20px; }
+.banner.small { margin: 10px 0; padding: 8px 12px; }
+.banner.good { background: var(--good-bg); border-color: var(--good-line); color: var(--good-text); }
+.banner.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-text); }
+.banner.bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad-text); }
+.banner.info { background: var(--info-bg); border-color: var(--info-line); color: var(--info-text); }
+.drop { border: 2px dashed var(--line); border-radius: 8px; padding: 12px; }
+.drop.over { border-color: var(--accent); background: var(--info-bg); }
+.formats { margin: 4px 0 10px; padding-left: 20px; color: var(--muted); }
+textarea { width: 100%; min-height: 160px; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+#planjson { min-height: 200px; margin-top: 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
+.file { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.file input { max-width: 100%; }
+button, select { font: inherit; }
+button { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+select { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; max-width: 100%; }
+.opts { margin: 14px 0; display: grid; gap: 12px; min-width: 0; }
+.opts > label { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-weight: 600; }
+.opts > label select { font-weight: 400; width: 100%; max-width: 30em; }
+fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px 12px; margin: 0; min-width: 0; }
+legend { font-weight: 600; padding: 0 4px; }
+.grp { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; }
+.grp input { margin-top: 5px; }
+.tag { font-size: 0.78em; background: var(--code-bg); border-radius: 4px; padding: 1px 6px; color: var(--muted); }
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { border-collapse: collapse; width: 100%; font-size: 0.94em; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); white-space: nowrap; }
+table.num td:not(:last-child) { font-variant-numeric: tabular-nums; }
+tr.total td { font-weight: 700; }
+td code { white-space: nowrap; overflow-wrap: normal; }
+tr.badrow td { color: var(--bad-text); }
+dl.kv { display: grid; grid-template-columns: minmax(140px, max-content) 1fr; gap: 6px 14px; margin: 0; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+.lede { margin-top: 0; }
+.rec { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; overflow: hidden; }
+.rec-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; background: var(--code-bg); padding: 8px 12px; }
+.rec-n { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.6em; }
+.rec .word code { font-size: 1.12em; font-weight: 700; background: transparent; padding: 0; }
+.rec-body { padding: 8px 12px; }
+.bits { margin: 4px 0 0; padding-left: 20px; font-size: 0.94em; }
+.export { margin-top: 18px; }
+details summary { cursor: pointer; font-weight: 600; }
+footer { color: var(--muted); font-size: 0.9em; border-top: 1px solid var(--line); margin-top: 28px; padding-top: 12px; }
+footer ul { padding-left: 20px; }
+@media (max-width: 560px) {
+  h1 { font-size: 1.35rem; }
+  .card { padding: 12px; }
+  dl.kv { grid-template-columns: 1fr; gap: 2px; }
+  dl.kv dd { margin-bottom: 8px; }
+  th, td { padding: 5px 6px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>CMP 170HX fuse planner</h1>
+  <p class="sub">For the NVIDIA CMP 170HX (GA100) 8 GB card. Paste a read of your own card to see what its fuses allow and, when the read is complete, the exact FF record words a burn would need.</p>
+</header>
+
+<section class="danger" role="note" aria-labelledby="warn-h">
+  <h2 id="warn-h">Burns are permanent</h2>
+  <ul>
+    <li>An FF record cannot be undone. A wrong word can leave a card at PCIe x1, without a driver, or not booting at all.</li>
+    <li>Plan only from your own cold read of this card. Never use another card's read, plan or record words, even from the same batch.</li>
+    <li>Check every plan with ffcalc: <code>python3 -m ffcalc sim card.json plan.json</code> must end in SIMULATION OK.</li>
+    <li>Have a second person review every word before you burn it.</li>
+  </ul>
+  <p>This page writes nothing to any card and gives no burn commands.</p>
+</section>
+
+<p class="privacy"><strong>Nothing leaves this browser.</strong> The page loads no scripts, fonts or data from anywhere, and its content security policy blocks every network request. Your read is processed on this device and is not stored.</p>
+
+<main>
+<section class="card" id="input-sec">
+  <h2>Your read</h2>
+  <div id="drop" class="drop">
+    <label for="input">Paste a read here or drop a file on this box. Accepted:</label>
+    <ul class="formats">
+      <li>an ffcalc card dump: JSON with <code>sku</code>, <code>option_words</code> and <code>ff_rows</code></li>
+      <li>a <code>vfi_snap.py --rows</code> snapshot: JSON whose two row reads matched (<code>rows_match</code> true)</li>
+      <li>a rows file: one <code>&lt;row&gt; &lt;value&gt;</code> pair per line, as ffcalc reads it (decoded view only)</li>
+    </ul>
+    <textarea id="input" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="{ &quot;sku&quot;: &quot;8gb&quot;, &quot;option_words&quot;: { ... }, &quot;ff_rows&quot;: { &quot;222&quot;: &quot;0x...&quot;, ... } }"></textarea>
+    <div class="row">
+      <label class="file">Open a file <input type="file" id="file" accept=".json,.txt,.log,text/plain,application/json"></label>
+      <button type="button" id="clear">Clear</button>
+    </div>
+  </div>
+  <div class="opts">
+    <label>Card
+      <select id="sku">
+        <option value="auto">From the read (8 GB when it does not say)</option>
+        <option value="8gb">8 GB (10de:20c2), 8 GiB per FBP</option>
+        <option value="10gb">10 GB (10de:2082), 4 GiB per FBP</option>
+      </select>
+    </label>
+    <fieldset id="groups"></fieldset>
+  </div>
+  <button type="button" id="go" class="primary">Analyze</button>
+</section>
+
+<div id="out" aria-live="polite"></div>
+
+<section class="card">
+  <details>
+    <summary>How this page plans, and when it refuses</summary>
+    <ul>
+      <li><strong>Targets</strong> follow ffcalc's rule: each floorsweep field's target is its own defective mask, so only units that are not marked defective are cleared. The four PCIe link-speed fields go to 0.</li>
+      <li><strong>Records</strong> come only from a complete read: every FF row from 222 to 486 present, unburnt rows as 0. One record per changed 16-bit block; every other bit of that block keeps the value the existing records give it. New rows start right after the last used row.</li>
+      <li><strong>Order</strong>: compute with the GPC block (chain 1 block 8) last, then memory with the FBP block (chain 1 block 19) last, then PCIe. A block with changes from two sets is written once, at its earlier position, with a warning.</li>
+      <li><strong>Simulation</strong>: before anything is shown, the existing rows plus the plan are replayed and every field is decoded and compared with its target. Every word must have bit 5 clear, encode and decode back to itself, and land on a blank row inside 222 to 486.</li>
+      <li><strong>Refusals</strong>: a partial or missing read; a vfi_snap read whose two passes differ; a word with bit 5 set among the FF rows; a live mask that the FF rows do not reproduce; a target that would enable a unit, or a slice of an FBP, marked defective; a block that needs a change but has no record to read its other bits from; a missing mask for a ticked group; too few rows.</li>
+      <li><strong>Left out on purpose</strong>: the whole-word PCIE_MAGIC_BITS_D rewrite, the device ID fields and bit 1 of chain 2 block 39. NVLink and SYS_PIPE are off by default: clearing them has not been shown to turn those features on.</li>
+    </ul>
+  </details>
+</section>
+</main>
+
+<footer>
+  <p>Field map and record format from cmp170hx-ffcalc (github.com/sayhellotojungle/cmp170hx-ffcalc). PCIe fuse locations as measured on burned 8 GB cards: OPT_DISABLE_GEN3_SPEED is chain 2 block 39 bit 9; PCIE_MAGIC_BITS_D bit 25 is chain 2 block 47 bit 3, with the register equal to (block47 &lt;&lt; 22) | (block46 &lt;&lt; 6); OPT_PCIE_BOOT_GEN3_DIS is chain 2 block 49 bit 7; OPT_PCIE_BOOT_GEN23_DIS is chain 2 block 49 bit 6.</p>
+  <p>No warranty. You alone decide what you burn.</p>
+</footer>
+</div>
+<script id="fuseplan-core">
+/*@@CORE@@*/
+</script>
+<script id="fuseplan-ui">
+/*@@UI@@*/
+</script>
+</body>
+</html>
