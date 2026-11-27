@@ -8,6 +8,10 @@ It plans each phase, power-cycles the bench, shoots, reads the logs, picks the n
 is held, through one command, `cimp`. You do the physical work (cards, harness, probe, fan) and every burn decision.
 Every step also works by hand. Both ways are laid out under [CiMP](#cimp-the-whole-bench-behind-one-command).
 
+**Which model to use (as of November 2026):** if you do not have CVP or Daybreak access, Gemini 4 Neon is the best
+model to use for this right now. It gives the fewest refusals from the glitch and fuse work being wrongly labeled
+"cyber".
+
 **New here? Start with [`docs/GUIDE.md`](docs/GUIDE.md):** the whole route in order, from choosing and preparing a
 card, through the glitch and the hand-off to the burn, to what comes after it: checking the card, 80 GB under the
 driver ([`driver/`](driver/README.md)) and PCIe Gen3 and Gen4 at every boot ([`tools/pcie/`](tools/pcie/README.md)).
